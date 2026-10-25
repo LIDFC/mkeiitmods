@@ -2,7 +2,13 @@ import { mkdirSync, statSync } from "node:fs";
 import { readFile, writeFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
 
-import { getErrorCode, getErrorMessageOrDefault, parseError, unknownToError } from "@vortex/shared";
+import {
+  getErrorCode,
+  getErrorMessageOrDefault,
+  parseError,
+  unknownToError,
+  APP_DISPLAY_NAME,
+} from "@vortex/shared";
 import type { IParameters, ISetItem } from "@vortex/shared/cli";
 import {
   DataInvalid,
@@ -23,6 +29,12 @@ import uuidpkg from "uuid";
 const { v4: uuidv4 } = uuidpkg;
 import winapi from "winapi-bindings";
 
+import {
+  assertNotVortexDataPath,
+  type IDataPathEnv,
+  multiUserRootPath,
+  dataRootPath,
+} from "./appIdentity";
 import { shutdownBsdiffWorker } from "./bsdiff/host";
 import { parseCommandline, updateStartupSettings } from "./cli";
 import { installDevelExtensions } from "./devel";
@@ -143,6 +155,7 @@ class Application {
     app.commandLine.appendSwitch("js-flags", `--max-old-space-size=${args.maxMemory || 4096}`);
 
     this.mBasePath = app.getPath("userData");
+    assertNotVortexDataPath(this.mBasePath, this.dataPathEnv());
     mkdirSync(this.mBasePath, { recursive: true });
 
     setVortexPath("temp", path.join(getVortexPath("userData"), "temp"));
@@ -281,17 +294,16 @@ class Application {
     });
 
     const onReady = () => {
-      const vortexPath = process.env.NODE_ENV === "development" ? "vortex_devel" : "vortex";
+      const dataEnv = this.dataPathEnv();
 
       // if userData specified, use it
       let userData =
         args.userData ??
         // (only on windows) use ProgramData from environment
         (args.shared && process.platform === "win32" && process.env.ProgramData !== undefined
-          ? path.join(process.env.ProgramData, "vortex")
-          : // this allows the development build to access data from the
-            // production version and vice versa
-            path.resolve(app.getPath("userData"), "..", vortexPath));
+          ? multiUserRootPath(process.env.ProgramData)
+          : dataRootPath(dataEnv));
+      assertNotVortexDataPath(userData, dataEnv);
       userData = path.join(userData, currentStatePath);
 
       // handle nxm:// internally
@@ -626,7 +638,8 @@ class Application {
      */
 
     try {
-      await stat(path.join(getVortexPath("application"), "Uninstall Vortex.exe"));
+      // mkeiitmods: the uninstaller is named after productName
+      await stat(path.join(getVortexPath("application"), `Uninstall ${APP_DISPLAY_NAME}.exe`));
       // Collect metadata - renderer will dispatch the action
       this.mAppMetadata!.installType = "regular";
     } catch {
@@ -886,9 +899,17 @@ class Application {
     return budget.allow();
   }
 
+  private dataPathEnv(): IDataPathEnv {
+    return {
+      appData: app.getPath("appData"),
+      programData: process.env.ProgramData,
+      development: process.env.NODE_ENV === "development",
+    };
+  }
+
   private multiUserPath() {
     if (process.platform === "win32" && process.env.ProgramData !== undefined) {
-      const muPath = path.join(process.env.ProgramData, "vortex");
+      const muPath = multiUserRootPath(process.env.ProgramData);
       try {
         mkdirSync(muPath, { recursive: true });
       } catch (err) {
@@ -1008,6 +1029,7 @@ class Application {
       } else if (multiUser) {
         dataPath = this.multiUserPath();
       }
+      assertNotVortexDataPath(dataPath, this.dataPathEnv());
       setVortexPath("userData", dataPath);
       this.mBasePath = dataPath;
 

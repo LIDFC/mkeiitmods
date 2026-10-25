@@ -25,7 +25,12 @@ import type {
 } from "@nexusmods/nexus-api";
 import type Nexus from "@nexusmods/nexus-api";
 import { NexusError, TimeoutError } from "@nexusmods/nexus-api";
-import { getErrorMessageOrDefault, parseError, unknownToError } from "@vortex/shared";
+import {
+  getErrorMessageOrDefault,
+  parseError,
+  TELEMETRY_ENABLED,
+  unknownToError,
+} from "@vortex/shared";
 import { AlreadyDownloaded } from "@vortex/shared/errors";
 import Bluebird from "bluebird";
 import * as semver from "semver";
@@ -1167,6 +1172,11 @@ export function onSubmitFeedback(nexus: Nexus) {
     anonymous: boolean,
     callback: (err: Error, response?: IFeedbackResponse) => void,
   ) => {
+    // mkeiitmods: this would file the report with the Vortex team at Nexus Mods
+    if (!TELEMETRY_ENABLED) {
+      callback(new Error("Sending feedback to Nexus Mods is turned off in mkeiitmods."));
+      return;
+    }
     submitFeedback(nexus, title, message, feedbackFiles, anonymous, hash)
       .then((response) => callback(null, response))
       .catch((err) => callback(err));
@@ -1381,6 +1391,10 @@ export function sendMetric(api: IExtensionApi, nexus: Nexus) {
     metadata: Record<string, any>,
     clientString?: string,
   ) => {
+    // mkeiitmods: metrics are Vortex telemetry
+    if (!TELEMETRY_ENABLED) {
+      return;
+    }
     try {
       await nexus.sendMetric(eventType, entityType, entityId, metadata, clientString);
     } catch {
